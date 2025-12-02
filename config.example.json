@@ -1,0 +1,13 @@
+{
+  "meili_url": "http://127.0.0.1:7700",
+  "meili_api_key": "masterKey",
+  "meili_index_uid": "games",
+  "mode": "rebuild",
+  "bge_model_name": "BAAI/bge-m3",
+  "bge_use_fp16": false,
+  "encode_batch_size": 64,
+  "index_batch_size": 256,
+  "top_k": 10,
+  "txt_path": "./games.txt",
+  "debug": false
+}

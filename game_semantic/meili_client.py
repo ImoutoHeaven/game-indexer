@@ -1,0 +1,281 @@
+"""Lightweight Meilisearch wrapper for game indexing and search."""
+
+import logging
+from typing import Any, Dict, List
+
+import meilisearch
+try:  # SDK versions differ on exported error types
+    from meilisearch.errors import MeiliSearchApiError
+except Exception:  # noqa: BLE001
+    MeiliSearchApiError = Exception  # type: ignore[misc,assignment]
+
+
+class MeiliGameIndex:
+    """Helper around a Meilisearch index configured for BGE-M3 vectors."""
+
+    def __init__(
+        self,
+        url: str,
+        api_key: str,
+        index_uid: str = "games",
+        embedder_name: str = "bge_m3",
+        embedding_dim: int = 1024,
+    ):
+        self.client = meilisearch.Client(url, api_key)
+        self.index_uid = index_uid
+        self.embedder_name = embedder_name
+        self.embedding_dim = embedding_dim
+        self.index = self._get_or_create_index()
+
+    def _get_or_create_index(self):
+        """Return an Index object, creating the index when missing."""
+        index = self.client.index(self.index_uid)
+
+        # Validate existence
+        try:
+            if hasattr(index, "get_raw_info"):
+                index.get_raw_info()
+            else:
+                index.get_stats()
+            return index
+        except Exception:
+            logging.info("Index %s missing; creating.", self.index_uid)
+
+        # Create index if missing
+        try:
+            self.client.create_index(uid=self.index_uid, options={"primaryKey": "id"})
+        except Exception as exc:  # noqa: BLE001
+            # If already exists or other races, proceed to return index anyway
+            logging.debug("create_index returned %s", exc)
+        return self.client.index(self.index_uid)
+
+    def delete_index(self):
+        """Delete the index if it exists."""
+        try:
+            self.client.delete_index(self.index_uid)
+            logging.info("Deleted index %s", self.index_uid)
+        except MeiliSearchApiError as exc:
+            if getattr(exc, "code", None) == "index_not_found":
+                logging.info("Index %s not found; nothing to delete.", self.index_uid)
+            else:
+                logging.warning("Failed to delete index %s: %s", self.index_uid, exc)
+        except Exception as exc:  # noqa: BLE001
+            logging.warning("Failed to delete index %s: %s", self.index_uid, exc)
+
+    def fetch_existing_names_and_max_id(self, page_size: int = 1000):
+        """
+        Fetch existing documents' names and max id for append/dedup purposes.
+
+        Returns (names_set, max_id).
+        """
+        names = set()
+        max_id = 0
+        offset = 0
+
+        def _extract_results(data):
+            if isinstance(data, dict):
+                if "results" in data:
+                    return data.get("results") or []
+                if "hits" in data:
+                    return data.get("hits") or []
+                # Some SDKs may return list directly
+            if isinstance(data, list):
+                return data
+            results = getattr(data, "results", None)
+            if results is not None:
+                return results
+            to_dict = getattr(data, "dict", None)
+            if callable(to_dict):
+                try:
+                    converted = to_dict()
+                    if isinstance(converted, dict):
+                        if "results" in converted:
+                            return converted.get("results") or []
+                        if "hits" in converted:
+                            return converted.get("hits") or []
+                except Exception:
+                    pass
+            if hasattr(data, "__dict__"):
+                maybe = data.__dict__.get("results") or data.__dict__.get("hits")
+                if maybe is not None:
+                    return maybe
+            return data
+
+        while True:
+            try:
+                data = self.index.get_documents(
+                    {
+                        "offset": offset,
+                        "limit": page_size,
+                        "fields": ["id", "name"],
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                logging.warning("Failed to fetch documents for dedup: %s", exc)
+                break
+
+            docs = _extract_results(data)
+            if not docs:
+                break
+
+            for doc in docs:
+                name = doc.get("name") if isinstance(doc, dict) else getattr(doc, "name", None)
+                doc_id = doc.get("id") if isinstance(doc, dict) else getattr(doc, "id", None)
+                if name:
+                    names.add(name)
+                if isinstance(doc_id, int) and doc_id > max_id:
+                    max_id = doc_id
+
+            offset += len(docs)
+            if len(docs) < page_size:
+                break
+
+        logging.debug("Fetched %d existing names, max_id=%d", len(names), max_id)
+        return names, max_id
+
+    def fetch_all_names_list(self, page_size: int = 1000):
+        """
+        Fetch all document names as an ordered list (may include duplicates).
+        """
+        all_names: List[str] = []
+        offset = 0
+
+        def _extract_results(data):
+            if isinstance(data, dict):
+                if "results" in data:
+                    return data.get("results") or []
+                if "hits" in data:
+                    return data.get("hits") or []
+            if isinstance(data, list):
+                return data
+            results = getattr(data, "results", None)
+            if results is not None:
+                return results
+            to_dict = getattr(data, "dict", None)
+            if callable(to_dict):
+                try:
+                    converted = to_dict()
+                    if isinstance(converted, dict):
+                        if "results" in converted:
+                            return converted.get("results") or []
+                        if "hits" in converted:
+                            return converted.get("hits") or []
+                except Exception:
+                    pass
+            if hasattr(data, "__dict__"):
+                maybe = data.__dict__.get("results") or data.__dict__.get("hits")
+                if maybe is not None:
+                    return maybe
+            return data
+
+        while True:
+            try:
+                data = self.index.get_documents(
+                    {
+                        "offset": offset,
+                        "limit": page_size,
+                        "fields": ["name"],
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                logging.warning("Failed to fetch documents for refine: %s", exc)
+                break
+
+            docs = _extract_results(data)
+            if not docs:
+                break
+
+            for doc in docs:
+                name = doc.get("name") if isinstance(doc, dict) else getattr(doc, "name", None)
+                if name:
+                    all_names.append(name)
+
+            offset += len(docs)
+            if len(docs) < page_size:
+                break
+
+        logging.debug("Fetched %d names for refine", len(all_names))
+        return all_names
+
+    def ensure_settings(self):
+        """
+        Ensure embedders/searchable/displayed settings exist.
+
+        Logs warnings instead of raising if the Meilisearch version lacks support.
+        """
+        target_embedder = {
+            self.embedder_name: {
+                "source": "userProvided",
+                "dimensions": self.embedding_dim,
+            }
+        }
+
+        try:
+            current = self.index.get_settings()
+        except Exception as exc:  # noqa: BLE001
+            logging.warning("Unable to read index settings: %s", exc)
+            current = {}
+        else:
+            logging.debug("Current settings keys: %s", list(current.keys()) if isinstance(current, dict) else current)
+
+        updates: Dict[str, Any] = {}
+
+        existing_embedders = (current or {}).get("embedders") or {}
+        if existing_embedders.get(self.embedder_name) != target_embedder[self.embedder_name]:
+            merged = dict(existing_embedders)
+            merged.update(target_embedder)
+            updates["embedders"] = merged
+
+        if current.get("searchableAttributes") != ["name"]:
+            updates["searchableAttributes"] = ["name"]
+
+        if current.get("displayedAttributes") != ["id", "name"]:
+            updates["displayedAttributes"] = ["id", "name"]
+
+        if not updates:
+            logging.debug("No settings changes required.")
+            return
+
+        try:
+            self.index.update_settings(updates)
+        except Exception as exc:  # noqa: BLE001
+            logging.warning("Failed to update index settings (likely unsupported): %s", exc)
+        else:
+            logging.debug("Settings update sent: %s", updates)
+
+    def add_documents(self, docs: List[Dict[str, Any]]):
+        """Add a batch of documents to the index."""
+        if not docs:
+            return
+        logging.debug("Adding %d documents", len(docs))
+        target_index = self.index
+        if not hasattr(target_index, "add_documents"):
+            target_index = self.client.index(self.index_uid)
+        target_index.add_documents(docs)
+
+    def search_by_vector(self, query_vector: List[float], limit: int = 10) -> List[Dict[str, Any]]:
+        """Search using a dense vector, with embedder-aware and legacy fallbacks."""
+        attempts = [
+            (
+                "vector+hybrid",
+                {
+                    "vector": query_vector,
+                    "hybrid": {"semanticRatio": 1.0, "embedder": self.embedder_name},
+                    "limit": limit,
+                },
+            ),
+        ]
+
+        last_exc: Exception | None = None
+        for label, payload in attempts:
+            try:
+                result = self.index.search("", payload)
+                hits = result.get("hits", [])
+                logging.debug("Search attempt %s succeeded with %d hits", label, len(hits))
+                return hits
+            except Exception as exc:  # noqa: BLE001
+                logging.debug("Search attempt %s failed: %s", label, exc)
+                last_exc = exc
+
+        logging.warning("All search attempts failed; returning empty list. Last error: %s", last_exc)
+        return []
