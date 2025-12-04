@@ -20,12 +20,46 @@ class MeiliGameIndex:
         index_uid: str = "games",
         embedder_name: str = "bge_m3",
         embedding_dim: int = 1024,
+        displayed_attributes: list[str] | None = None,
+        searchable_attributes: list[str] | None = None,
     ):
         self.client = meilisearch.Client(url, api_key)
         self.index_uid = index_uid
         self.embedder_name = embedder_name
         self.embedding_dim = embedding_dim
+        self.displayed_attributes = displayed_attributes or ["id", "name"]
+        self.searchable_attributes = searchable_attributes or ["name"]
         self.index = self._get_or_create_index()
+
+    @staticmethod
+    def _extract_results(data):
+        """Normalize SDK responses to a list of dicts."""
+        if isinstance(data, dict):
+            if "results" in data:
+                return data.get("results") or []
+            if "hits" in data:
+                return data.get("hits") or []
+        if isinstance(data, list):
+            return data
+        results = getattr(data, "results", None)
+        if results is not None:
+            return results
+        to_dict = getattr(data, "dict", None)
+        if callable(to_dict):
+            try:
+                converted = to_dict()
+                if isinstance(converted, dict):
+                    if "results" in converted:
+                        return converted.get("results") or []
+                    if "hits" in converted:
+                        return converted.get("hits") or []
+            except Exception:
+                pass
+        if hasattr(data, "__dict__"):
+            maybe = data.__dict__.get("results") or data.__dict__.get("hits")
+            if maybe is not None:
+                return maybe
+        return data
 
     def _get_or_create_index(self):
         """Return an Index object, creating the index when missing."""
@@ -72,35 +106,6 @@ class MeiliGameIndex:
         max_id = 0
         offset = 0
 
-        def _extract_results(data):
-            if isinstance(data, dict):
-                if "results" in data:
-                    return data.get("results") or []
-                if "hits" in data:
-                    return data.get("hits") or []
-                # Some SDKs may return list directly
-            if isinstance(data, list):
-                return data
-            results = getattr(data, "results", None)
-            if results is not None:
-                return results
-            to_dict = getattr(data, "dict", None)
-            if callable(to_dict):
-                try:
-                    converted = to_dict()
-                    if isinstance(converted, dict):
-                        if "results" in converted:
-                            return converted.get("results") or []
-                        if "hits" in converted:
-                            return converted.get("hits") or []
-                except Exception:
-                    pass
-            if hasattr(data, "__dict__"):
-                maybe = data.__dict__.get("results") or data.__dict__.get("hits")
-                if maybe is not None:
-                    return maybe
-            return data
-
         while True:
             try:
                 data = self.index.get_documents(
@@ -114,7 +119,7 @@ class MeiliGameIndex:
                 logging.warning("Failed to fetch documents for dedup: %s", exc)
                 break
 
-            docs = _extract_results(data)
+            docs = self._extract_results(data)
             if not docs:
                 break
 
@@ -140,34 +145,6 @@ class MeiliGameIndex:
         all_names: List[str] = []
         offset = 0
 
-        def _extract_results(data):
-            if isinstance(data, dict):
-                if "results" in data:
-                    return data.get("results") or []
-                if "hits" in data:
-                    return data.get("hits") or []
-            if isinstance(data, list):
-                return data
-            results = getattr(data, "results", None)
-            if results is not None:
-                return results
-            to_dict = getattr(data, "dict", None)
-            if callable(to_dict):
-                try:
-                    converted = to_dict()
-                    if isinstance(converted, dict):
-                        if "results" in converted:
-                            return converted.get("results") or []
-                        if "hits" in converted:
-                            return converted.get("hits") or []
-                except Exception:
-                    pass
-            if hasattr(data, "__dict__"):
-                maybe = data.__dict__.get("results") or data.__dict__.get("hits")
-                if maybe is not None:
-                    return maybe
-            return data
-
         while True:
             try:
                 data = self.index.get_documents(
@@ -181,7 +158,7 @@ class MeiliGameIndex:
                 logging.warning("Failed to fetch documents for refine: %s", exc)
                 break
 
-            docs = _extract_results(data)
+            docs = self._extract_results(data)
             if not docs:
                 break
 
@@ -226,11 +203,11 @@ class MeiliGameIndex:
             merged.update(target_embedder)
             updates["embedders"] = merged
 
-        if current.get("searchableAttributes") != ["name"]:
-            updates["searchableAttributes"] = ["name"]
+        if current.get("searchableAttributes") != self.searchable_attributes:
+            updates["searchableAttributes"] = self.searchable_attributes
 
-        if current.get("displayedAttributes") != ["id", "name"]:
-            updates["displayedAttributes"] = ["id", "name"]
+        if current.get("displayedAttributes") != self.displayed_attributes:
+            updates["displayedAttributes"] = self.displayed_attributes
 
         if not updates:
             logging.debug("No settings changes required.")
@@ -243,7 +220,7 @@ class MeiliGameIndex:
         else:
             logging.debug("Settings update sent: %s", updates)
 
-    def add_documents(self, docs: List[Dict[str, Any]]):
+    def add_documents(self, docs: List[Dict[str, Any]], wait: bool = False):
         """Add a batch of documents to the index."""
         if not docs:
             return
@@ -251,7 +228,47 @@ class MeiliGameIndex:
         target_index = self.index
         if not hasattr(target_index, "add_documents"):
             target_index = self.client.index(self.index_uid)
-        target_index.add_documents(docs)
+        task = target_index.add_documents(docs)
+        if wait:
+            task_uid = None
+            if isinstance(task, dict):
+                task_uid = task.get("uid") or task.get("taskUid") or task.get("updateId")
+            try:
+                if task_uid is not None and hasattr(self.client, "wait_for_task"):
+                    self.client.wait_for_task(task_uid)
+            except Exception as exc:  # noqa: BLE001
+                logging.debug("wait_for_task 失败: %s", exc)
+
+    def fetch_documents(self, fields: list[str] | None = None, page_size: int = 1000) -> list[dict]:
+        """
+        Retrieve all documents with optional field selection.
+        """
+        results: list[dict] = []
+        offset = 0
+        while True:
+            try:
+                data = self.index.get_documents(
+                    {
+                        "offset": offset,
+                        "limit": page_size,
+                        "fields": fields,
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                logging.warning("Failed to fetch documents: %s", exc)
+                break
+
+            docs = self._extract_results(data)
+            if not docs:
+                break
+
+            results.extend(docs)
+            offset += len(docs)
+            if len(docs) < page_size:
+                break
+
+        logging.debug("Fetched %d documents (fields=%s)", len(results), fields or "all")
+        return results
 
     def search_by_vector(self, query_vector: List[float], limit: int = 10) -> List[Dict[str, Any]]:
         """Search using a dense vector, with embedder-aware and legacy fallbacks."""
