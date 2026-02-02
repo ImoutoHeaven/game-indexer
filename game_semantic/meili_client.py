@@ -34,32 +34,39 @@ class MeiliGameIndex:
     @staticmethod
     def _extract_results(data):
         """Normalize SDK responses to a list of dicts."""
+        def _as_list(value):
+            if isinstance(value, list):
+                return value
+            if isinstance(value, dict):
+                return [value]
+            return []
+
         if isinstance(data, dict):
             if "results" in data:
-                return data.get("results") or []
+                return _as_list(data.get("results"))
             if "hits" in data:
-                return data.get("hits") or []
+                return _as_list(data.get("hits"))
         if isinstance(data, list):
             return data
         results = getattr(data, "results", None)
         if results is not None:
-            return results
+            return _as_list(results)
         to_dict = getattr(data, "dict", None)
         if callable(to_dict):
             try:
                 converted = to_dict()
                 if isinstance(converted, dict):
                     if "results" in converted:
-                        return converted.get("results") or []
+                        return _as_list(converted.get("results"))
                     if "hits" in converted:
-                        return converted.get("hits") or []
-            except Exception:
-                pass
+                        return _as_list(converted.get("hits"))
+            except Exception as exc:
+                logging.debug("to_dict failed in _extract_results: %s", exc)
         if hasattr(data, "__dict__"):
             maybe = data.__dict__.get("results") or data.__dict__.get("hits")
             if maybe is not None:
-                return maybe
-        return data
+                return _as_list(maybe)
+        return []
 
     def _get_or_create_index(self):
         """Return an Index object, creating the index when missing."""
@@ -72,8 +79,11 @@ class MeiliGameIndex:
             else:
                 index.get_stats()
             return index
-        except Exception:
-            logging.info("Index %s missing; creating.", self.index_uid)
+        except Exception as exc:
+            if isinstance(exc, MeiliSearchApiError) and getattr(exc, "code", None) == "index_not_found":
+                logging.info("Index %s missing; creating.", self.index_uid)
+            else:
+                raise
 
         # Create index if missing
         try:
@@ -194,6 +204,8 @@ class MeiliGameIndex:
             current = {}
         else:
             logging.debug("Current settings keys: %s", list(current.keys()) if isinstance(current, dict) else current)
+            if not isinstance(current, dict):
+                current = {}
 
         updates: Dict[str, Any] = {}
 
@@ -237,7 +249,7 @@ class MeiliGameIndex:
                 if task_uid is not None and hasattr(self.client, "wait_for_task"):
                     self.client.wait_for_task(task_uid)
             except Exception as exc:  # noqa: BLE001
-                logging.debug("wait_for_task 失败: %s", exc)
+                logging.debug("wait_for_task failed: %s", exc)
 
     def fetch_documents(self, fields: list[str] | None = None, page_size: int = 1000) -> list[dict]:
         """
@@ -270,29 +282,25 @@ class MeiliGameIndex:
         logging.debug("Fetched %d documents (fields=%s)", len(results), fields or "all")
         return results
 
-    def search_by_vector(self, query_vector: List[float], limit: int = 10) -> List[Dict[str, Any]]:
-        """Search using a dense vector, with embedder-aware and legacy fallbacks."""
-        attempts = [
-            (
-                "vector+hybrid",
-                {
-                    "vector": query_vector,
-                    "hybrid": {"semanticRatio": 1.0, "embedder": self.embedder_name},
-                    "limit": limit,
-                },
-            ),
-        ]
+    def search_by_vector(
+        self,
+        query_vector: List[float],
+        limit: int = 10,
+        embedder_key: str | None = None,
+    ) -> List[Dict[str, Any]]:
+        """Search using a dense vector with embedder-aware payload."""
+        target_embedder = embedder_key or self.embedder_name
+        payload = {
+            "vector": query_vector,
+            "hybrid": {"semanticRatio": 1.0, "embedder": target_embedder},
+            "limit": limit,
+        }
 
-        last_exc: Exception | None = None
-        for label, payload in attempts:
-            try:
-                result = self.index.search("", payload)
-                hits = result.get("hits", [])
-                logging.debug("Search attempt %s succeeded with %d hits", label, len(hits))
-                return hits
-            except Exception as exc:  # noqa: BLE001
-                logging.debug("Search attempt %s failed: %s", label, exc)
-                last_exc = exc
-
-        logging.warning("All search attempts failed; returning empty list. Last error: %s", last_exc)
-        return []
+        try:
+            result = self.index.search("", payload)
+            hits = result.get("hits", [])
+            logging.debug("Vector search succeeded with %d hits", len(hits))
+            return hits
+        except Exception as exc:  # noqa: BLE001
+            logging.warning("Vector search failed; returning empty list: %s", exc)
+            return []

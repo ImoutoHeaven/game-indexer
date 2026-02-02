@@ -1,0 +1,32 @@
+{% extends "layout.html" %}
+
+{% block title %}Search{% endblock %}
+
+{% block content %}
+  <h1>Search</h1>
+  <form method="get" action="/search">
+    <label for="library">Library</label>
+    <select id="library" name="library">
+      {% if libraries %}
+        {% for library in libraries %}
+          <option value="{{ library.id }}">{{ library.name }}</option>
+        {% endfor %}
+      {% else %}
+        <option value="">No libraries available</option>
+      {% endif %}
+    </select>
+
+    <label for="embedder">Embedder</label>
+    <select id="embedder" name="embedder">
+      {% if embedders %}
+        {% for embedder in embedders %}
+          <option value="{{ embedder.id }}">{{ embedder.name }}</option>
+        {% endfor %}
+      {% else %}
+        <option value="">No embedders available</option>
+      {% endif %}
+    </select>
+
+    <button type="submit">Search</button>
+  </form>
+{% endblock %}

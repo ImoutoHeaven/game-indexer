@@ -1,0 +1,21 @@
+{% extends "layout.html" %}
+
+{% block title %}Libraries{% endblock %}
+
+{% block content %}
+  <h1>Libraries</h1>
+  {% if libraries %}
+    <ul>
+      {% for library in libraries %}
+        <li>
+          <strong>{{ library.name }}</strong>
+          {% if library.description %}
+            <span>{{ library.description }}</span>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p>No libraries yet.</p>
+  {% endif %}
+{% endblock %}

@@ -10,7 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from game_semantic.config import load_config_from_env_and_args
-from game_semantic.search_cli import interactive_search
+from game_semantic import service
 
 
 def main():
@@ -27,7 +27,7 @@ def main():
 
     args = parser.parse_args()
     config = load_config_from_env_and_args(args)
-    interactive_search(config)
+    service.search_games(config)
 
 
 if __name__ == "__main__":

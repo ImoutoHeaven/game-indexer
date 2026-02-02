@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""通用相似度去重 CLI：支持 txt/json 或文件夹扫描，基于 BGE-M3 + Meilisearch。"""
+"""Generic similarity dedupe CLI for txt/json or directory scans via BGE-M3 + Meilisearch."""
 
 import argparse
 import sys
@@ -11,32 +11,45 @@ if str(ROOT) not in sys.path:
 
 from game_semantic.config import load_config_from_env_and_args
 from game_semantic.deduper import (
-    dedupe_items,
     dump_items_to_json,
     load_items_from_json,
     load_items_from_txt,
     scan_filesystem,
 )
+from game_semantic import service
 
 
 def main():
-    parser = argparse.ArgumentParser(description="按相似度阈值分组近似重复的文件名/条目。")
-    parser.add_argument("-i", "--input", dest="input_path", help="输入文件路径（txt 或 json）。")
-    parser.add_argument("--fs", dest="fs_path", help="递归扫描文件夹作为输入数据源。")
-    parser.add_argument("--output-json", dest="output_json", help="当使用 --fs 时，将扫描结果保存为 JSON。")
+    parser = argparse.ArgumentParser(
+        description="Group near-duplicate filenames/items by similarity threshold."
+    )
+    parser.add_argument("-i", "--input", dest="input_path", help="Input file path (txt or json).")
+    parser.add_argument("--fs", dest="fs_path", help="Recursively scan a directory as input.")
+    parser.add_argument(
+        "--output-json", dest="output_json", help="When using --fs, save scan output to JSON."
+    )
     parser.add_argument(
         "--mode",
         dest="mode",
         choices=["rebuild", "append"],
-        help="索引模式：rebuild 重建，append 追加。",
+        help="Index mode: rebuild or append.",
     )
-    parser.add_argument("--threshold", dest="threshold", type=float, default=0.85, help="综合相似度阈值。")
-    parser.add_argument("--top-k", dest="top_k", type=int, help="为每条记录检索的相似邻居数量。")
-    parser.add_argument("--time-window", dest="time_window", type=float, default=900.0, help="时间相似度窗口（秒）。")
-    parser.add_argument("--check-time", dest="check_time", action="store_true", help="同时使用 ctime/mtime 参与相似度。")
-    parser.add_argument("--check-ctime", dest="check_ctime", action="store_true", help="使用 ctime 参与相似度。")
-    parser.add_argument("--check-mtime", dest="check_mtime", action="store_true", help="使用 mtime 参与相似度。")
-    parser.add_argument("--check-size", dest="check_size", action="store_true", help="使用文件大小参与相似度。")
+    parser.add_argument(
+        "--threshold", dest="threshold", type=float, default=0.85, help="Composite similarity threshold."
+    )
+    parser.add_argument("--top-k", dest="top_k", type=int, help="Nearest neighbors per item.")
+    parser.add_argument(
+        "--time-window", dest="time_window", type=float, default=900.0, help="Time similarity window (seconds)."
+    )
+    parser.add_argument(
+        "--check-time",
+        dest="check_time",
+        action="store_true",
+        help="Use both ctime and mtime for similarity.",
+    )
+    parser.add_argument("--check-ctime", dest="check_ctime", action="store_true", help="Use ctime for similarity.")
+    parser.add_argument("--check-mtime", dest="check_mtime", action="store_true", help="Use mtime for similarity.")
+    parser.add_argument("--check-size", dest="check_size", action="store_true", help="Use file size for similarity.")
 
     parser.add_argument("--meili-url", dest="meili_url", help="Meilisearch endpoint URL.")
     parser.add_argument("--meili-api-key", dest="meili_api_key", help="Meilisearch API key.")
@@ -51,7 +64,7 @@ def main():
 
     args = parser.parse_args()
     if args.input_path and args.fs_path:
-        parser.error("不能同时指定 --input 和 --fs。")
+        parser.error("Cannot specify both --input and --fs.")
 
     config = load_config_from_env_and_args(args)
 
@@ -60,11 +73,11 @@ def main():
         items = scan_filesystem(args.fs_path)
         output_path = args.output_json or "fs_scan.json"
         dump_items_to_json(items, output_path)
-        print(f"已写出扫描结果到 {output_path}")
+        print(f"Wrote scan output to {output_path}")
     else:
         input_path = args.input_path or config.txt_path
         if not input_path:
-            parser.error("请提供 --input 或 --fs。")
+            parser.error("Provide --input or --fs.")
         suffix = Path(input_path).suffix.lower()
         if suffix == ".json":
             items = load_items_from_json(input_path)
@@ -72,13 +85,13 @@ def main():
             items = load_items_from_txt(input_path)
 
     if not items:
-        print("没有可处理的记录。")
+        print("No records to process.")
         return
 
     check_ctime = bool(args.check_ctime or args.check_time)
     check_mtime = bool(args.check_mtime or args.check_time)
 
-    dedupe_items(
+    service.dedupe_items(
         items,
         config=config,
         mode=args.mode or config.mode,
