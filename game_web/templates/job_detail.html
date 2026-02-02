@@ -1,0 +1,34 @@
+{% extends "layout.html" %}
+
+{% block title %}Job {{ job.id }}{% endblock %}
+
+{% block content %}
+  <h1>Job {{ job.id }}</h1>
+  <dl>
+    <dt>Type</dt>
+    <dd>{{ job.job_type }}</dd>
+    <dt>Status</dt>
+    <dd>{{ job.status }}</dd>
+    <dt>Library</dt>
+    <dd>{{ job.library_name }}</dd>
+    <dt>Dataset</dt>
+    <dd>{{ job.dataset_filename }}</dd>
+    <dt>Created</dt>
+    <dd>{{ job.created_at }}</dd>
+    <dt>Updated</dt>
+    <dd>{{ job.updated_at }}</dd>
+    {% if job.error %}
+      <dt>Error</dt>
+      <dd>{{ job.error }}</dd>
+    {% endif %}
+  </dl>
+  <section>
+    <h2>Logs</h2>
+    {% if log_text %}
+      <pre>{{ log_text }}</pre>
+    {% else %}
+      <p>No logs yet.</p>
+    {% endif %}
+  </section>
+  <p><a href="/jobs">Back to jobs</a></p>
+{% endblock %}

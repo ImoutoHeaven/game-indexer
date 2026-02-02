@@ -23,6 +23,32 @@ pip install -r requirements.txt
   - `refine`：从目标索引拉取全部 name→去重→删除该索引→重建（不依赖文件）
 - 其他：`bge_model_name`、`bge_use_fp16`、`encode_batch_size`、`index_batch_size`、`top_k`、`txt_path`、`debug`
 
+## WebUI 快速启动
+
+1) 启动 Meilisearch（任选一种）：
+
+```bash
+docker run --rm -p 7700:7700 -e MEILI_MASTER_KEY=masterKey getmeili/meilisearch:v1.7
+```
+
+```bash
+meilisearch --master-key masterKey --http-addr 127.0.0.1:7700
+```
+
+2) 启动 WebUI：
+
+```bash
+python bin/web_ui.py --reload
+```
+
+3) 打开 `http://127.0.0.1:8000/setup`，设置管理员密码后登录。
+4) 进入 `Settings` 填写 Meili URL / API Key（默认 `http://127.0.0.1:7700` / `masterKey`）。
+5) 创建 Library（name + index uid），在 Library 详情页上传 `games.txt` 触发 build job。
+6) 进入 `Jobs` 点击运行队列，等待 job 完成。
+7) 进入 `Search` 选择 library/profile，输入关键词进行搜索。
+
+完整步骤与检查项见 `docs/manual-webui.md`。
+
 ## 准备数据
 
 创建 `games.txt`，每行一个条目，允许混合多语言：
@@ -82,5 +108,6 @@ python bin/dedupe_items.py --input scan.json --mode append --top-k 15 --check-ct
 
 - `game_semantic/`：配置、向量生成、Meilisearch 封装、索引构建与搜索 REPL 逻辑
 - `bin/`：命令行入口脚本（构建索引、交互搜索、相似度去重）
-- `tests/manual.md`：手动验证步骤
-- `plan-bge-m3-meili-games.md`：实现计划与设计说明
+- `game_web/`：Web UI 路由、模板、服务与本地数据逻辑
+- `docs/manual-webui.md`：WebUI 手动验证清单
+- `docs/plans/2026-02-02-webui-basic-usable.md`：WebUI 实现计划与设计说明

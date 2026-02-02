@@ -48,3 +48,12 @@ def require_login(request: Request) -> str:
         _reject()
 
     return session_id
+
+
+def require_login_redirect(request: Request) -> str:
+    try:
+        return require_login(request)
+    except HTTPException as exc:
+        if exc.status_code == 401:
+            raise HTTPException(status_code=302, headers={"Location": "/login"})
+        raise

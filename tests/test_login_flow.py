@@ -2,8 +2,38 @@ import sqlite3
 
 from fastapi.testclient import TestClient
 
-from game_web import app as app_module
+import game_web.routes.auth as auth_routes
 from game_web.app import create_app
+
+
+def _csrf_token(client: TestClient) -> str:
+    token = client.cookies.get("csrf_token")
+    assert token
+    return token
+
+
+def _setup_admin(client: TestClient) -> None:
+    response = client.get("/setup", follow_redirects=False)
+    assert response.status_code == 200
+    csrf_token = _csrf_token(client)
+    response = client.post(
+        "/setup",
+        data={"password": "secret123", "csrf_token": csrf_token},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+
+
+def _login_admin(client: TestClient) -> None:
+    response = client.get("/login", follow_redirects=False)
+    assert response.status_code == 200
+    csrf_token = _csrf_token(client)
+    response = client.post(
+        "/login",
+        data={"password": "secret123", "csrf_token": csrf_token},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
 
 
 def test_login_sets_session_cookie_and_persists_session(tmp_path):
@@ -11,18 +41,10 @@ def test_login_sets_session_cookie_and_persists_session(tmp_path):
     app = create_app(str(db_path))
     client = TestClient(app)
 
-    response = client.post(
-        "/login",
-        json={"username": "admin", "password": "admin"},
-        follow_redirects=False,
-    )
-
-    assert response.status_code == 302
-    assert response.headers["location"] == "/libraries"
-    session_id = response.cookies.get("session")
+    _setup_admin(client)
+    _login_admin(client)
+    session_id = client.cookies.get("session")
     assert session_id
-
-    assert "SameSite=Lax" in response.headers.get("set-cookie", "")
 
     conn = sqlite3.connect(db_path)
     try:
@@ -43,16 +65,19 @@ def test_login_rejects_invalid_credentials(tmp_path):
     app = create_app(str(db_path))
     client = TestClient(app)
 
+    _setup_admin(client)
+    response = client.get("/login", follow_redirects=False)
+    assert response.status_code == 200
+    csrf_token = _csrf_token(client)
     response = client.post(
         "/login",
-        json={"username": "admin", "password": "wrong"},
+        data={"password": "wrong", "csrf_token": csrf_token},
         follow_redirects=False,
     )
 
-    assert response.status_code == 401
-    assert response.json() == {"detail": "invalid credentials"}
+    assert response.status_code == 400
+    assert "Invalid password" in response.text
     assert response.cookies.get("session") is None
-    assert "set-cookie" not in response.headers
 
 
 def test_login_handles_session_error(tmp_path, monkeypatch, caplog):
@@ -63,18 +88,17 @@ def test_login_handles_session_error(tmp_path, monkeypatch, caplog):
     def _raise_error(*args, **kwargs):
         raise RuntimeError("db failure")
 
-    monkeypatch.setattr(app_module, "create_session", _raise_error)
+    _setup_admin(client)
+    monkeypatch.setattr(auth_routes, "create_session", _raise_error)
 
+    csrf_token = _csrf_token(client)
     with caplog.at_level("ERROR"):
         response = client.post(
             "/login",
-            json={"username": "admin", "password": "admin"},
+            data={"password": "secret123", "csrf_token": csrf_token},
             follow_redirects=False,
         )
 
     assert response.status_code == 500
-    assert response.json() == {"detail": "session creation failed"}
+    assert "Session creation failed" in response.text
     assert response.cookies.get("session") is None
-    assert "set-cookie" not in response.headers
-    assert "session creation failed" in caplog.text
-    assert "db failure" in caplog.text

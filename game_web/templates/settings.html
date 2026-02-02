@@ -1,0 +1,32 @@
+{% extends "layout.html" %}
+
+{% block title %}Settings{% endblock %}
+
+{% block content %}
+  <h1>Settings</h1>
+  {% if error %}
+    <p>{{ error }}</p>
+  {% endif %}
+  <section>
+    <h2>Meilisearch connection</h2>
+    <form method="post" action="/settings">
+      <input type="hidden" name="csrf_token" value="{{ request.cookies.get('csrf_token', '') }}">
+      <label for="meili_url">Meilisearch URL</label>
+      <input id="meili_url" name="meili_url" type="text" value="{{ meili_url }}">
+      <label for="meili_api_key">Meilisearch API key</label>
+      <input id="meili_api_key" name="meili_api_key" type="password" value="">
+      <p>API key status: {{ api_key_status }}</p>
+      {% if api_key_status == "Invalid" %}
+        <p>Please re-enter the API key to fix this value.</p>
+      {% elif api_key_status == "Reset required" %}
+        <p>The encryption key is missing. Please re-enter the API key.</p>
+      {% endif %}
+      <label>
+        <input type="checkbox" name="clear_api_key" value="1">
+        Clear API key
+      </label>
+      <p>If you provide a new API key, it overrides the clear option.</p>
+      <button type="submit">Save</button>
+    </form>
+  </section>
+{% endblock %}

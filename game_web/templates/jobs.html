@@ -1,0 +1,35 @@
+{% extends "layout.html" %}
+
+{% block title %}Jobs{% endblock %}
+
+{% block content %}
+  <h1>Jobs</h1>
+  {% if jobs %}
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Type</th>
+          <th>Status</th>
+          <th>Library</th>
+          <th>Dataset</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for job in jobs %}
+          <tr>
+            <td><a href="/jobs/{{ job.id }}">{{ job.id }}</a></td>
+            <td>{{ job.job_type }}</td>
+            <td>{{ job.status }}</td>
+            <td>{{ job.library_name }}</td>
+            <td>{{ job.dataset_filename }}</td>
+            <td>{{ job.created_at }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>No jobs yet.</p>
+  {% endif %}
+{% endblock %}

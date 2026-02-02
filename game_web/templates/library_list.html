@@ -4,14 +4,35 @@
 
 {% block content %}
   <h1>Libraries</h1>
+  {% if error %}
+    <p>{{ error }}</p>
+  {% endif %}
+  <section>
+    <h2>Create library</h2>
+    <form method="post" action="/libraries/create">
+      <input type="hidden" name="csrf_token" value="{{ request.cookies.get('csrf_token', '') }}">
+      <label for="name">Name</label>
+      <input id="name" name="name" type="text" required>
+      <label for="index_uid">Index UID</label>
+      <input id="index_uid" name="index_uid" type="text" required>
+      <label for="description">Description</label>
+      <input id="description" name="description" type="text">
+      <button type="submit">Create</button>
+    </form>
+  </section>
   {% if libraries %}
     <ul>
       {% for library in libraries %}
         <li>
-          <strong>{{ library.name }}</strong>
+          <a href="/libraries/{{ library.id }}"><strong>{{ library.name }}</strong></a>
+          <span>{{ library.index_uid }}</span>
           {% if library.description %}
             <span>{{ library.description }}</span>
           {% endif %}
+          <form method="post" action="/libraries/{{ library.id }}/delete" style="display: inline;">
+            <input type="hidden" name="csrf_token" value="{{ request.cookies.get('csrf_token', '') }}">
+            <button type="submit">Delete</button>
+          </form>
         </li>
       {% endfor %}
     </ul>

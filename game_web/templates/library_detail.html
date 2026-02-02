@@ -1,0 +1,74 @@
+{% extends "layout.html" %}
+
+{% block title %}Library details{% endblock %}
+
+{% block content %}
+  <h1>{{ library.name }}</h1>
+  <p>Index UID: {{ library.index_uid }}</p>
+  {% if library.description %}
+    <p>{{ library.description }}</p>
+  {% endif %}
+  {% if error %}
+    <p>{{ error }}</p>
+  {% endif %}
+  <section>
+    <h2>Embedding profiles</h2>
+    {% if profiles %}
+      <table>
+        <thead>
+          <tr>
+            <th>Key</th>
+            <th>Model</th>
+            <th>FP16</th>
+            <th>Max length</th>
+            <th>Variant</th>
+            <th>Enabled</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for profile in profiles %}
+            <tr>
+              <td>{{ profile.key }}</td>
+              <td>{{ profile.model_name }}</td>
+              <td>{{ profile.use_fp16 }}</td>
+              <td>{{ profile.max_length }}</td>
+              <td>{{ profile.variant }}</td>
+              <td>{{ profile.enabled }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>No profiles yet.</p>
+    {% endif %}
+  </section>
+  <section>
+    <h2>Upload dataset</h2>
+    <form method="post" action="/libraries/{{ library.id }}/datasets/upload" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ request.cookies.get('csrf_token', '') }}">
+      <label for="dataset_file">Dataset file</label>
+      <input id="dataset_file" name="file" type="file" required>
+      <button type="submit">Upload</button>
+    </form>
+  </section>
+  <section>
+    <h2>Create profile</h2>
+    <form method="post" action="/libraries/{{ library.id }}/profiles/create">
+      <input type="hidden" name="csrf_token" value="{{ request.cookies.get('csrf_token', '') }}">
+      <label for="profile_key">Key</label>
+      <input id="profile_key" name="key" type="text" required>
+      <label for="profile_model">Model name</label>
+      <input id="profile_model" name="model_name" type="text" required>
+      <label for="profile_use_fp16">Use FP16</label>
+      <input id="profile_use_fp16" name="use_fp16" type="number" min="0" max="1" value="0" required>
+      <label for="profile_max_length">Max length</label>
+      <input id="profile_max_length" name="max_length" type="number" min="1" value="128" required>
+      <label for="profile_variant">Variant</label>
+      <input id="profile_variant" name="variant" type="text" value="raw" required>
+      <label for="profile_enabled">Enabled</label>
+      <input id="profile_enabled" name="enabled" type="number" min="0" max="1" value="1" required>
+      <button type="submit">Create</button>
+    </form>
+  </section>
+  <p><a href="/libraries">Back to libraries</a></p>
+{% endblock %}

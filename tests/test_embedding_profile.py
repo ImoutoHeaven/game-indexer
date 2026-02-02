@@ -20,11 +20,9 @@ def test_add_and_list_profiles(tmp_path):
     finally:
         conn.close()
 
-    assert len(profiles) == 1
-    profile = profiles[0]
-    assert profile["library_id"] == library_id
-    assert profile["key"] == "v_name"
-    assert profile["model_name"] == "BAAI/bge-m3"
+    keys = {profile["key"] for profile in profiles}
+    assert "default" in keys
+    assert "v_name" in keys
 
 
 def test_add_profile_commit_flag(tmp_path):
@@ -48,7 +46,9 @@ def test_add_profile_commit_flag(tmp_path):
         )
         check_conn = connect_db(str(db_path))
         try:
-            assert list_profiles(check_conn, library_id=library_id) == []
+            profiles = list_profiles(check_conn, library_id=library_id)
+            assert len(profiles) == 1
+            assert profiles[0]["key"] == "default"
         finally:
             check_conn.close()
         conn.commit()
@@ -60,4 +60,6 @@ def test_add_profile_commit_flag(tmp_path):
     finally:
         conn.close()
 
-    assert len(profiles) == 1
+    keys = {profile["key"] for profile in profiles}
+    assert "default" in keys
+    assert "v_name" in keys

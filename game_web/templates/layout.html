@@ -6,6 +6,19 @@
     <title>{% block title %}Libraries{% endblock %}</title>
   </head>
   <body>
+    {% if show_nav %}
+      <header>
+        <nav>
+          <a href="/libraries">Libraries</a>
+          <a href="/jobs">Jobs</a>
+          <a href="/search">Search</a>
+          <form method="post" action="/logout" style="display: inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token if csrf_token is defined else request.cookies.get('csrf_token', '') }}">
+            <button type="submit">Logout</button>
+          </form>
+        </nav>
+      </header>
+    {% endif %}
     <main>
       {% block content %}{% endblock %}
     </main>

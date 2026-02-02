@@ -9,7 +9,9 @@
     <select id="library" name="library">
       {% if libraries %}
         {% for library in libraries %}
-          <option value="{{ library.id }}">{{ library.name }}</option>
+          <option value="{{ library.id }}" {% if selected_library == library.id %}selected{% endif %}>
+            {{ library.name }}
+          </option>
         {% endfor %}
       {% else %}
         <option value="">No libraries available</option>
@@ -20,13 +22,30 @@
     <select id="embedder" name="embedder">
       {% if embedders %}
         {% for embedder in embedders %}
-          <option value="{{ embedder.id }}">{{ embedder.name }}</option>
+          <option value="{{ embedder.key }}" {% if selected_embedder == embedder.key %}selected{% endif %}>
+            {{ embedder.key }}
+          </option>
         {% endfor %}
       {% else %}
         <option value="">No embedders available</option>
       {% endif %}
     </select>
 
+    <label for="q">Query</label>
+    <input id="q" name="q" type="text" value="{{ query }}">
+
     <button type="submit">Search</button>
   </form>
+
+  {% if error_message %}
+    <p>{{ error_message }}</p>
+  {% elif searched and not results %}
+    <p>No results</p>
+  {% elif results %}
+    <ul>
+      {% for result in results %}
+        <li>{{ result.name }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
 {% endblock %}

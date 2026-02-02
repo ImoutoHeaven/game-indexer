@@ -18,3 +18,8 @@ def create_session(conn: Any, user_id: int, ttl_hours: int = 24) -> str:
     )
     conn.commit()
     return session_id
+
+
+def delete_session(conn: Any, session_id: str) -> None:
+    conn.execute("delete from session where id = ?", (session_id,))
+    conn.commit()
