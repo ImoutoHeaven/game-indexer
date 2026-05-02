@@ -5,7 +5,7 @@ import time
 from typing import List
 
 from .config import Config
-from .embedding import BgeM3Embedder
+from .embedding import get_cached_bge_m3
 from .meili_client import MeiliGameIndex
 
 VALID_MODES = {"rebuild", "append", "refine"}
@@ -114,7 +114,7 @@ def build_index(config: Config):
             logging.warning("No new names to append; exiting.")
             return
 
-    embedder = BgeM3Embedder(model_name=config.bge_model_name, use_fp16=config.bge_use_fp16)
+    embedder = get_cached_bge_m3(config.bge_model_name, config.bge_use_fp16)
 
     docs_batch = []
     next_id = start_id
@@ -124,7 +124,7 @@ def build_index(config: Config):
         dense_vecs = embedder.encode_dense(
             batch_names,
             batch_size=len(batch_names),
-            max_length=128,
+            max_length=config.embedding_max_length,
         )
 
         for name, vec in zip(batch_names, dense_vecs):
@@ -139,13 +139,13 @@ def build_index(config: Config):
             if len(docs_batch) >= config.index_batch_size:
                 logging.info("Writing %d documents (up to id=%d)", len(docs_batch), next_id - 1)
                 logging.debug("First doc of batch: %s", docs_batch[0])
-                game_index.add_documents(docs_batch)
+                game_index.add_documents(docs_batch, wait=True)
                 docs_batch = []
 
     if docs_batch:
         logging.info("Writing final %d documents (up to id=%d)", len(docs_batch), next_id - 1)
         logging.debug("First doc of final batch: %s", docs_batch[0])
-        game_index.add_documents(docs_batch)
+        game_index.add_documents(docs_batch, wait=True)
 
     elapsed = time.time() - start_time
     logging.info("Index build completed in %.2fs", elapsed)

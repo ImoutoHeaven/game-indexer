@@ -42,12 +42,22 @@ python bin/web_ui.py --reload
 ```
 
 3) 打开 `http://127.0.0.1:8000/setup`，设置管理员密码后登录。
-4) 进入 `Settings` 填写 Meili URL / API Key（默认 `http://127.0.0.1:7700` / `masterKey`）。
-5) 创建 Library（name + index uid），在 Library 详情页上传 `games.txt` 触发 build job。
-6) 进入 `Jobs` 点击运行队列，等待 job 完成。
-7) 进入 `Search` 选择 library/profile，输入关键词进行搜索。
+4) 先进入 `Settings` 填写 Meili URL / API Key（默认 `http://127.0.0.1:7700` / `masterKey`）。保存时会直接检查连通性；如果配置已保存但连接失败，页面会明确提示这一状态。
+5) 登录后的默认工作台是 `Libraries`。创建 Library（name + index uid）后，进入对应的 Library Detail 页面。
+6) 在 Library Detail 页面按这个顺序完成主流程：
+   - `Search Configuration`：确认当前 active search configuration（model name / use FP16 / max length）
+   - `Dataset & Build`：上传 `games.txt`。上传成功后会留在当前 Library Detail 页面，并显示 `Build job queued`
+   - `Recent Build`：立即查看最新 build 状态，或从当前页直接触发 `Run next queued job`
+7) 队列执行是手动的，不会自动在后台消费。你可以在 Library Detail 页面直接运行队列，也可以进入 `Jobs` 页面点击 `Run next queued job`。
+8) 只有状态为 `Searchable` 的 libraries 才会出现在 `Search` 页面。构建失败、仍在排队、正在构建、配置无效或 Meilisearch 不可达的 library 都不会出现在搜索下拉框里。
+9) 进入 `Search` 后只需选择 library 并输入 query。WebUI 不再暴露 profile/embedder 选择，查询会自动使用该 library 当前的 active search configuration。
 
-完整步骤与检查项见 `docs/manual-webui.md`。
+### WebUI Operator Notes
+
+- 推荐操作顺序：`Settings -> Libraries -> Library Detail -> Jobs -> Search`
+- 上传数据集只会创建 queued build job，不会自动执行队列
+- 如果最近一次 build 失败，相关 library 不会出现在 Search 页面；先到 Library Detail 或 Jobs 查看错误摘要和日志
+- 当前 MVA 仅支持未经过 Cloudflare 代理的自托管 Meilisearch。Cloudflare-proxied Meilisearch 不在这个范围内
 
 ## 准备数据
 

@@ -1,6 +1,232 @@
+import pytest
+
 from game_web.db import connect_db, init_db
 from game_web.services import dataset_service, job_service, library_service
 from game_web.services.job_runner import JobRunner
+
+
+@pytest.fixture(autouse=True)
+def _stub_build_execution(monkeypatch):
+    def _execute_build_job(*, db_path, data_dir, job, log):
+        log(f"build job {job['id']} for {job['dataset_filename']}")
+
+    monkeypatch.setattr("game_web.services.job_runner.execute_build_job", _execute_build_job)
+
+
+def test_job_runner_executes_real_build_callback_and_marks_job_done(tmp_path, monkeypatch):
+    db_path = tmp_path / "app.db"
+    data_dir = tmp_path / "data"
+    init_db(str(db_path))
+    conn = connect_db(str(db_path))
+    try:
+        library_service.create_library(
+            conn,
+            name="Primary Library",
+            index_uid="primary-index",
+            description="Main games library",
+        )
+        dataset = dataset_service.create_dataset(
+            conn,
+            data_dir=data_dir,
+            library_id=1,
+            filename="games.txt",
+            content=b"A\n",
+        )
+        job_id = job_service.create_job(
+            conn,
+            library_id=1,
+            dataset_id=int(dataset["id"]),
+            job_type="build",
+            status="queued",
+        )
+    finally:
+        conn.close()
+
+    captured = {}
+
+    def _execute_build_job(*, db_path, data_dir, job, log):
+        captured["db_path"] = db_path
+        captured["data_dir"] = data_dir
+        captured["job_id"] = job["id"]
+        log(f"building job {job['id']}")
+
+    monkeypatch.setattr("game_web.services.job_runner.execute_build_job", _execute_build_job)
+
+    runner = JobRunner(db_path=str(db_path), data_dir=data_dir)
+    try:
+        assert runner.run_next() == job_id
+    finally:
+        runner.shutdown()
+
+    conn = connect_db(str(db_path))
+    try:
+        job = job_service.get_job(conn, job_id)
+    finally:
+        conn.close()
+
+    assert captured["db_path"] == str(db_path)
+    assert captured["data_dir"] == data_dir
+    assert captured["job_id"] == job_id
+    assert job is not None
+    assert job["status"] == "done"
+
+
+def test_job_runner_marks_job_failed_when_build_wait_raises(tmp_path, monkeypatch):
+    db_path = tmp_path / "app.db"
+    data_dir = tmp_path / "data"
+    init_db(str(db_path))
+    conn = connect_db(str(db_path))
+    try:
+        library_service.create_library(
+            conn,
+            name="Primary Library",
+            index_uid="primary-index",
+            description="Main games library",
+        )
+        dataset = dataset_service.create_dataset(
+            conn,
+            data_dir=data_dir,
+            library_id=1,
+            filename="games.txt",
+            content=b"A\n",
+        )
+        job_id = job_service.create_job(
+            conn,
+            library_id=1,
+            dataset_id=int(dataset["id"]),
+            job_type="build",
+            status="queued",
+        )
+    finally:
+        conn.close()
+
+    def _wait_failure(*, db_path, data_dir, job, log):
+        log("submitted build task")
+        raise RuntimeError("task wait failed")
+
+    monkeypatch.setattr("game_web.services.job_runner.execute_build_job", _wait_failure)
+
+    runner = JobRunner(db_path=str(db_path), data_dir=data_dir)
+    try:
+        with pytest.raises(RuntimeError, match="task wait failed"):
+            runner.run_next()
+    finally:
+        runner.shutdown()
+
+    conn = connect_db(str(db_path))
+    try:
+        job = job_service.get_job(conn, job_id)
+    finally:
+        conn.close()
+
+    assert job is not None
+    assert job["status"] == "failed"
+
+
+def test_job_runner_skips_superseded_jobs_and_runs_next_queued_job(tmp_path):
+    db_path = tmp_path / "app.db"
+    data_dir = tmp_path / "data"
+    init_db(str(db_path))
+    conn = connect_db(str(db_path))
+    try:
+        library_service.create_library(
+            conn,
+            name="Primary Library",
+            index_uid="primary-index",
+            description="Main games library",
+        )
+        dataset = dataset_service.create_dataset(
+            conn,
+            data_dir=data_dir,
+            library_id=1,
+            filename="games.txt",
+            content=b"A\n",
+        )
+        older_job_id = job_service.create_job(
+            conn,
+            library_id=1,
+            dataset_id=int(dataset["id"]),
+            job_type="build",
+            status="queued",
+        )
+        newest_job_id = job_service.create_job(
+            conn,
+            library_id=1,
+            dataset_id=int(dataset["id"]),
+            job_type="build",
+            status="queued",
+        )
+    finally:
+        conn.close()
+
+    runner = JobRunner(db_path=str(db_path), data_dir=data_dir)
+    try:
+        assert runner.run_next() == newest_job_id
+    finally:
+        runner.shutdown()
+
+    conn = connect_db(str(db_path))
+    try:
+        older_job = job_service.get_job(conn, older_job_id)
+        newest_job = job_service.get_job(conn, newest_job_id)
+    finally:
+        conn.close()
+
+    assert older_job is not None
+    assert older_job["status"] == "superseded"
+    assert newest_job is not None
+    assert newest_job["status"] == "done"
+
+
+def test_job_runner_marks_job_failed_when_execute_build_job_raises(tmp_path, monkeypatch):
+    db_path = tmp_path / "app.db"
+    data_dir = tmp_path / "data"
+    init_db(str(db_path))
+    conn = connect_db(str(db_path))
+    try:
+        library_service.create_library(
+            conn,
+            name="Primary Library",
+            index_uid="primary-index",
+            description="Main games library",
+        )
+        dataset = dataset_service.create_dataset(
+            conn,
+            data_dir=data_dir,
+            library_id=1,
+            filename="games.txt",
+            content=b"A\n",
+        )
+        job_id = job_service.create_job(
+            conn,
+            library_id=1,
+            dataset_id=int(dataset["id"]),
+            job_type="build",
+            status="queued",
+        )
+    finally:
+        conn.close()
+
+    def _boom(*, db_path, data_dir, job, log):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("game_web.services.job_runner.execute_build_job", _boom)
+
+    runner = JobRunner(db_path=str(db_path), data_dir=data_dir)
+    try:
+        with pytest.raises(RuntimeError):
+            runner.run_next()
+    finally:
+        runner.shutdown()
+
+    conn = connect_db(str(db_path))
+    try:
+        job = job_service.get_job(conn, job_id)
+    finally:
+        conn.close()
+
+    assert job is not None
+    assert job["status"] == "failed"
 
 
 def test_job_runner_marks_queued_job_done_and_writes_log(tmp_path):
@@ -34,7 +260,7 @@ def test_job_runner_marks_queued_job_done_and_writes_log(tmp_path):
 
     calls = {"count": 0}
 
-    def _execute(job, log):
+    def _execute(*, db_path, data_dir, job, log):
         calls["count"] += 1
         log(f"building job {job['id']}")
 
@@ -280,7 +506,7 @@ def test_job_runner_updates_status_when_log_append_fails(tmp_path, monkeypatch):
     finally:
         conn.close()
 
-    def _execute(_job, _log):
+    def _execute(*, db_path, data_dir, job, log):
         raise RuntimeError("boom")
 
     def _boom(*_args, **_kwargs):

@@ -1,3 +1,5 @@
+import pytest
+
 from game_semantic.meili_client import MeiliGameIndex
 
 
@@ -18,6 +20,19 @@ def test_search_payload_uses_embedder_key():
     index.search_by_vector([0.1, 0.2], embedder_key="custom_embedder")
 
     assert index.index.last_payload["hybrid"]["embedder"] == "custom_embedder"
+
+
+def test_search_by_vector_propagates_search_errors():
+    class ExplodingIndex:
+        def search(self, query, payload):
+            raise RuntimeError("meili query exploded")
+
+    index = MeiliGameIndex.__new__(MeiliGameIndex)
+    index.embedder_name = "bge_m3"
+    index.index = ExplodingIndex()
+
+    with pytest.raises(RuntimeError, match="meili query exploded"):
+        index.search_by_vector([0.1, 0.2])
 
 
 def test_extract_results_unknown_shape_returns_empty_list():

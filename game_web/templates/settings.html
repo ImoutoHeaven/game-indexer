@@ -4,6 +4,9 @@
 
 {% block content %}
   <h1>Settings</h1>
+  {% if notice %}
+    <p>{{ notice }}</p>
+  {% endif %}
   {% if error %}
     <p>{{ error }}</p>
   {% endif %}
@@ -15,17 +18,15 @@
       <input id="meili_url" name="meili_url" type="text" value="{{ meili_url }}">
       <label for="meili_api_key">Meilisearch API key</label>
       <input id="meili_api_key" name="meili_api_key" type="password" value="">
+      <p>Leave this blank and save to clear the stored API key.</p>
       <p>API key status: {{ api_key_status }}</p>
+      <p>Current status: {{ meili_status }}</p>
+      <p>{{ meili_status_message }}</p>
       {% if api_key_status == "Invalid" %}
         <p>Please re-enter the API key to fix this value.</p>
       {% elif api_key_status == "Reset required" %}
         <p>The encryption key is missing. Please re-enter the API key.</p>
       {% endif %}
-      <label>
-        <input type="checkbox" name="clear_api_key" value="1">
-        Clear API key
-      </label>
-      <p>If you provide a new API key, it overrides the clear option.</p>
       <button type="submit">Save</button>
     </form>
   </section>

@@ -8,6 +8,17 @@ def _timestamp() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def _row_to_dataset(row: Any) -> dict[str, Any]:
+    return {
+        "id": row[0],
+        "library_id": row[1],
+        "filename": row[2],
+        "storage_path": row[3],
+        "size_bytes": row[4],
+        "created_at": row[5],
+    }
+
+
 def create_job(
     conn: Any,
     library_id: int,
@@ -127,6 +138,149 @@ def get_next_queued_job(conn: Any) -> dict[str, Any] | None:
     if row is None:
         return None
     return get_job(conn, int(row[0]))
+
+
+def has_queued_build_jobs(conn: Any) -> bool:
+    row = conn.execute(
+        "select 1 from job where job_type = ? and status = ? limit 1",
+        ("build", "queued"),
+    ).fetchone()
+    return row is not None
+
+
+def claim_next_executable_job(conn: Any) -> dict[str, Any] | None:
+    """Return the next queued build job that has not been superseded, or None when no executable job exists."""
+    while True:
+        cur = conn.execute(
+            """
+            select job.id, job.library_id
+            from job
+            where job.job_type = ? and job.status = ?
+              and not exists (
+                  select 1
+                  from job running_job
+                  where running_job.job_type = ?
+                    and running_job.status = ?
+              )
+            order by job.id asc
+            limit 1
+            """,
+            ("build", "queued", "build", "running"),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+
+        job_id = int(row[0])
+        library_id = int(row[1])
+        newer_job = conn.execute(
+            """
+            select 1
+            from job
+            where library_id = ?
+              and job_type = ?
+              and id > ?
+            limit 1
+            """,
+            (library_id, "build", job_id),
+        ).fetchone()
+        if newer_job is None:
+            return get_job(conn, job_id)
+
+        updated = conn.execute(
+            """
+            update job
+            set status = ?,
+                updated_at = ?
+            where id = ? and status = ?
+            """,
+            ("superseded", _timestamp(), job_id, "queued"),
+        )
+        if updated.rowcount:
+            conn.commit()
+
+
+def get_latest_dataset_for_library(conn: Any, library_id: int) -> dict[str, Any] | None:
+    """Return the newest dataset row for one library, or None when absent."""
+    cur = conn.execute(
+        """
+        select id,
+            library_id,
+            filename,
+            storage_path,
+            size_bytes,
+            created_at
+        from dataset
+        where library_id = ?
+        order by id desc
+        limit 1
+        """,
+        (library_id,),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None
+    return _row_to_dataset(row)
+
+
+def get_latest_relevant_build_job(conn: Any, library_id: int) -> dict[str, Any] | None:
+    """Return the newest non-superseded build job for the latest dataset."""
+    dataset = get_latest_dataset_for_library(conn, library_id)
+    if dataset is None:
+        return None
+
+    cur = conn.execute(
+        """
+        select id
+        from job
+        where library_id = ?
+          and dataset_id = ?
+          and job_type = ?
+          and status != ?
+        order by id desc
+        limit 1
+        """,
+        (library_id, dataset["id"], "build", "superseded"),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None
+    return get_job(conn, int(row[0]))
+
+
+def supersede_queued_jobs(conn: Any, library_id: int) -> int:
+    """Mark older queued build jobs for one library as superseded."""
+    cur = conn.execute(
+        """
+        select id
+        from job
+        where library_id = ?
+          and job_type = ?
+          and status = ?
+        order by id desc
+        limit 1
+        """,
+        (library_id, "build", "queued"),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return 0
+
+    newest_job_id = int(row[0])
+    cur = conn.execute(
+        """
+        update job
+        set status = ?,
+            updated_at = ?
+        where library_id = ?
+          and job_type = ?
+          and status = ?
+          and id != ?
+        """,
+        ("superseded", _timestamp(), library_id, "build", "queued", newest_job_id),
+    )
+    conn.commit()
+    return cur.rowcount
 
 
 def update_job(

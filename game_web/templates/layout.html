@@ -12,6 +12,7 @@
           <a href="/libraries">Libraries</a>
           <a href="/jobs">Jobs</a>
           <a href="/search">Search</a>
+          <a href="/settings">Settings</a>
           <form method="post" action="/logout" style="display: inline;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token if csrf_token is defined else request.cookies.get('csrf_token', '') }}">
             <button type="submit">Logout</button>

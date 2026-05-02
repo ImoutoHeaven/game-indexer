@@ -4,6 +4,16 @@
 
 {% block content %}
   <h1>Jobs</h1>
+  {% if notice %}
+    <p>{{ notice }}</p>
+  {% endif %}
+  {% if error %}
+    <p>{{ error }}</p>
+  {% endif %}
+  <form method="post" action="/jobs/run">
+    <input type="hidden" name="csrf_token" value="{{ request.cookies.get('csrf_token', '') }}">
+    <button type="submit">Run next queued job</button>
+  </form>
   {% if jobs %}
     <table>
       <thead>
@@ -21,7 +31,12 @@
           <tr>
             <td><a href="/jobs/{{ job.id }}">{{ job.id }}</a></td>
             <td>{{ job.job_type }}</td>
-            <td>{{ job.status }}</td>
+            <td>
+              {{ job.status }}
+              {% if job.status == "superseded" %}
+                <div>This job never ran because a newer build request replaced it before execution.</div>
+              {% endif %}
+            </td>
             <td>{{ job.library_name }}</td>
             <td>{{ job.dataset_filename }}</td>
             <td>{{ job.created_at }}</td>

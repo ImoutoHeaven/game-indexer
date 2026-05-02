@@ -22,6 +22,15 @@
       <dd>{{ job.error }}</dd>
     {% endif %}
   </dl>
+  {% if job.status == "superseded" %}
+    <p>This job never ran because a newer build request replaced it before execution.</p>
+  {% endif %}
+  {% if library %}
+    <p><a href="/libraries/{{ library.id }}">Back to {{ library.name }}</a></p>
+    {% if library_status and library_status.state == "Searchable" %}
+      <p><a href="/search?library={{ library.id }}">Search this library</a></p>
+    {% endif %}
+  {% endif %}
   <section>
     <h2>Logs</h2>
     {% if log_text %}

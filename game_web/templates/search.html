@@ -18,19 +18,6 @@
       {% endif %}
     </select>
 
-    <label for="embedder">Embedder</label>
-    <select id="embedder" name="embedder">
-      {% if embedders %}
-        {% for embedder in embedders %}
-          <option value="{{ embedder.key }}" {% if selected_embedder == embedder.key %}selected{% endif %}>
-            {{ embedder.key }}
-          </option>
-        {% endfor %}
-      {% else %}
-        <option value="">No embedders available</option>
-      {% endif %}
-    </select>
-
     <label for="q">Query</label>
     <input id="q" name="q" type="text" value="{{ query }}">
 
@@ -40,7 +27,7 @@
   {% if error_message %}
     <p>{{ error_message }}</p>
   {% elif searched and not results %}
-    <p>No results</p>
+    <p>No similar results found</p>
   {% elif results %}
     <ul>
       {% for result in results %}

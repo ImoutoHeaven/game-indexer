@@ -68,6 +68,43 @@ class MeiliGameIndex:
                 return _as_list(maybe)
         return []
 
+    @staticmethod
+    def _extract_task_uid(task: Any) -> int | str | None:
+        """Normalize task identifiers across SDK dict and object responses."""
+        if isinstance(task, dict):
+            return task.get("uid") or task.get("taskUid") or task.get("updateId")
+
+        for attr in ("uid", "task_uid", "taskUid", "updateId"):
+            value = getattr(task, attr, None)
+            if value is not None:
+                return value
+        return None
+
+    @staticmethod
+    def _raise_for_terminal_task_failure(task: Any) -> None:
+        """Raise when Meilisearch reports a terminal failed or canceled task."""
+        if task is None:
+            return
+
+        status = getattr(task, "status", None)
+        if isinstance(task, dict):
+            status = task.get("status", status)
+        if status not in {"failed", "canceled", "cancelled"}:
+            return
+
+        error = getattr(task, "error", None)
+        if isinstance(task, dict):
+            error = task.get("error", error)
+
+        message = None
+        if isinstance(error, dict):
+            message = error.get("message") or error.get("code") or str(error)
+        elif error:
+            message = str(error)
+
+        detail = message or f"Meilisearch task ended with status '{status}'"
+        raise RuntimeError(detail)
+
     def _get_or_create_index(self):
         """Return an Index object, creating the index when missing."""
         index = self.client.index(self.index_uid)
@@ -242,14 +279,10 @@ class MeiliGameIndex:
             target_index = self.client.index(self.index_uid)
         task = target_index.add_documents(docs)
         if wait:
-            task_uid = None
-            if isinstance(task, dict):
-                task_uid = task.get("uid") or task.get("taskUid") or task.get("updateId")
-            try:
-                if task_uid is not None and hasattr(self.client, "wait_for_task"):
-                    self.client.wait_for_task(task_uid)
-            except Exception as exc:  # noqa: BLE001
-                logging.debug("wait_for_task failed: %s", exc)
+            task_uid = self._extract_task_uid(task)
+            if task_uid is not None and hasattr(self.client, "wait_for_task"):
+                task = self.client.wait_for_task(task_uid)
+            self._raise_for_terminal_task_failure(task)
 
     def fetch_documents(self, fields: list[str] | None = None, page_size: int = 1000) -> list[dict]:
         """
@@ -295,12 +328,7 @@ class MeiliGameIndex:
             "hybrid": {"semanticRatio": 1.0, "embedder": target_embedder},
             "limit": limit,
         }
-
-        try:
-            result = self.index.search("", payload)
-            hits = result.get("hits", [])
-            logging.debug("Vector search succeeded with %d hits", len(hits))
-            return hits
-        except Exception as exc:  # noqa: BLE001
-            logging.warning("Vector search failed; returning empty list: %s", exc)
-            return []
+        result = self.index.search("", payload)
+        hits = result.get("hits", [])
+        logging.debug("Vector search succeeded with %d hits", len(hits))
+        return hits

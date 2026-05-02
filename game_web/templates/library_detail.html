@@ -8,67 +8,57 @@
   {% if library.description %}
     <p>{{ library.description }}</p>
   {% endif %}
+  {% if notice %}
+    <p>{{ notice }}</p>
+  {% endif %}
   {% if error %}
     <p>{{ error }}</p>
   {% endif %}
   <section>
-    <h2>Embedding profiles</h2>
-    {% if profiles %}
-      <table>
-        <thead>
-          <tr>
-            <th>Key</th>
-            <th>Model</th>
-            <th>FP16</th>
-            <th>Max length</th>
-            <th>Variant</th>
-            <th>Enabled</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for profile in profiles %}
-            <tr>
-              <td>{{ profile.key }}</td>
-              <td>{{ profile.model_name }}</td>
-              <td>{{ profile.use_fp16 }}</td>
-              <td>{{ profile.max_length }}</td>
-              <td>{{ profile.variant }}</td>
-              <td>{{ profile.enabled }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p>No profiles yet.</p>
-    {% endif %}
+    <h2>Status</h2>
+    <p>{{ library_status.state }}</p>
+    <p>{{ library_status.message }}</p>
+    <a href="{{ library_status.detail_next_step.href }}">{{ library_status.detail_next_step.label }}</a>
   </section>
-  <section>
-    <h2>Upload dataset</h2>
+  <section id="search-configuration">
+    <h2>Search Configuration</h2>
+    <form method="post" action="/libraries/{{ library.id }}/search-config">
+      <input type="hidden" name="csrf_token" value="{{ request.cookies.get('csrf_token', '') }}">
+      <label for="profile_model">Model name</label>
+      <input id="profile_model" name="model_name" type="text" value="{{ active_profile.model_name }}" required>
+      <label for="profile_use_fp16">Use FP16</label>
+      <input id="profile_use_fp16" name="use_fp16" type="number" min="0" max="1" value="{{ active_profile.use_fp16 }}" required>
+      <label for="profile_max_length">Max length</label>
+      <input id="profile_max_length" name="max_length" type="number" min="1" value="{{ active_profile.max_length }}" required>
+      <button type="submit">Save configuration</button>
+    </form>
+  </section>
+  <section id="dataset-build">
+    <h2>Dataset & Build</h2>
     <form method="post" action="/libraries/{{ library.id }}/datasets/upload" enctype="multipart/form-data">
       <input type="hidden" name="csrf_token" value="{{ request.cookies.get('csrf_token', '') }}">
       <label for="dataset_file">Dataset file</label>
       <input id="dataset_file" name="file" type="file" required>
       <button type="submit">Upload</button>
     </form>
-  </section>
-  <section>
-    <h2>Create profile</h2>
-    <form method="post" action="/libraries/{{ library.id }}/profiles/create">
+    <form method="post" action="/jobs/run">
       <input type="hidden" name="csrf_token" value="{{ request.cookies.get('csrf_token', '') }}">
-      <label for="profile_key">Key</label>
-      <input id="profile_key" name="key" type="text" required>
-      <label for="profile_model">Model name</label>
-      <input id="profile_model" name="model_name" type="text" required>
-      <label for="profile_use_fp16">Use FP16</label>
-      <input id="profile_use_fp16" name="use_fp16" type="number" min="0" max="1" value="0" required>
-      <label for="profile_max_length">Max length</label>
-      <input id="profile_max_length" name="max_length" type="number" min="1" value="128" required>
-      <label for="profile_variant">Variant</label>
-      <input id="profile_variant" name="variant" type="text" value="raw" required>
-      <label for="profile_enabled">Enabled</label>
-      <input id="profile_enabled" name="enabled" type="number" min="0" max="1" value="1" required>
-      <button type="submit">Create</button>
+      <input type="hidden" name="return_to" value="/libraries/{{ library.id }}">
+      <button type="submit">Run next queued job</button>
     </form>
+  </section>
+  <section id="recent-build">
+    <h2>Recent Build</h2>
+    {% if recent_build %}
+      <p>{{ recent_build.status }}</p>
+      <p>{{ recent_build.updated_at }}</p>
+      {% if recent_build.error %}
+        <p>{{ recent_build.error }}</p>
+      {% endif %}
+      <p><a href="/jobs/{{ recent_build.id }}">Inspect job</a></p>
+    {% else %}
+      <p>No build yet.</p>
+    {% endif %}
   </section>
   <p><a href="/libraries">Back to libraries</a></p>
 {% endblock %}

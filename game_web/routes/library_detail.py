@@ -1,5 +1,6 @@
 import datetime
 import sqlite3
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -7,13 +8,45 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from game_web.auth_guard import require_login_redirect
 from game_web.csrf import require_csrf
 from game_web.db import connect_db
+from game_web.routes.library import _active_profile_is_valid, _get_meili_health_for_request
 from game_web.runtime import resolve_data_dir
 from game_web.services.dataset_service import UploadTooLarge, save_upload
-from game_web.services.embedding_profile import add_profile, list_profiles
+from game_web.services.embedding_profile import get_active_profile, upsert_active_profile
 from game_web.services import job_service
 from game_web.services.library_service import get_library
+from game_web.services.library_status import derive_library_status
 
 router = APIRouter()
+
+
+def _redirect_with_notice(path: str, notice: str) -> RedirectResponse:
+    return RedirectResponse(f"{path}?{urlencode({'notice': notice})}", status_code=302)
+
+
+def _library_detail_context(conn, request: Request, library_id: int) -> dict | None:
+    library = get_library(conn, library_id)
+    if library is None:
+        return None
+
+    active_profile = get_active_profile(conn, library_id)
+    latest_dataset = job_service.get_latest_dataset_for_library(conn, library_id)
+    recent_build = job_service.get_latest_relevant_build_job(conn, library_id)
+    meili_health = _get_meili_health_for_request(conn, request)
+    library_status = derive_library_status(
+        meili_state=meili_health.state,
+        has_dataset=latest_dataset is not None,
+        config_valid=_active_profile_is_valid(active_profile),
+        latest_relevant_job_status=recent_build["status"] if recent_build else None,
+    )
+    conn.commit()
+    return {
+        "request": request,
+        "library": library,
+        "active_profile": active_profile,
+        "library_status": library_status,
+        "recent_build": recent_build,
+        "show_nav": True,
+    }
 
 
 @router.get("/libraries/{library_id}", response_class=HTMLResponse)
@@ -24,12 +57,11 @@ def library_detail(
 ):
     conn = connect_db(request.app.state.db_path)
     try:
-        library = get_library(conn, library_id)
-        profiles = list_profiles(conn, library_id=library_id)
+        context = _library_detail_context(conn, request, library_id)
     finally:
         conn.close()
 
-    if library is None:
+    if context is None:
         raise HTTPException(status_code=404)
 
     templates = request.app.state.templates
@@ -37,10 +69,9 @@ def library_detail(
         request,
         "library_detail.html",
         {
-            "request": request,
-            "library": library,
-            "profiles": profiles,
-            "show_nav": True,
+            **context,
+            "notice": request.query_params.get("notice"),
+            "error": request.query_params.get("error"),
         },
     )
 
@@ -52,28 +83,24 @@ def dataset_upload(
     _: str = Depends(require_login_redirect),
     file: UploadFile | None = File(None),
     csrf_token: str = Form(""),
-):
+): 
     require_csrf(request, csrf_token)
 
     def render_error(message: str, status_code: int = 400):
         conn = connect_db(request.app.state.db_path)
         try:
-            library = get_library(conn, library_id)
-            profiles = list_profiles(conn, library_id=library_id)
+            context = _library_detail_context(conn, request, library_id)
         finally:
             conn.close()
-        if library is None:
+        if context is None:
             raise HTTPException(status_code=404)
         templates = request.app.state.templates
         return templates.TemplateResponse(
             request,
             "library_detail.html",
             {
-                "request": request,
-                "library": library,
-                "profiles": profiles,
+                **context,
                 "error": message,
-                "show_nav": True,
             },
             status_code=status_code,
         )
@@ -111,10 +138,10 @@ def dataset_upload(
             status="queued",
             commit=False,
         )
-        conn.commit()
+        job_service.supersede_queued_jobs(conn, library_id)
     except UploadTooLarge:
         conn.rollback()
-        raise HTTPException(status_code=413)
+        return render_error("Upload too large", status_code=413)
     except Exception:
         conn.rollback()
         if dataset is not None:
@@ -132,94 +159,71 @@ def dataset_upload(
             pass
         conn.close()
 
-    return RedirectResponse("/jobs", status_code=302)
+    return _redirect_with_notice(f"/libraries/{library_id}", "Build job queued")
 
 
-@router.post("/libraries/{library_id}/profiles/create")
-def profile_create(
+@router.post("/libraries/{library_id}/search-config")
+def update_search_config(
     request: Request,
     library_id: int,
     _: str = Depends(require_login_redirect),
-    key: str = Form(""),
     model_name: str = Form(""),
     use_fp16: str = Form("0"),
     max_length: str = Form("128"),
-    variant: str = Form("raw"),
-    enabled: str = Form("1"),
     csrf_token: str = Form(""),
 ):
     require_csrf(request, csrf_token)
-    key_value = key.strip()
-    model_value = model_name.strip()
-    variant_value = variant.strip() or "raw"
 
     def render_error(message: str, status_code: int = 400):
         conn = connect_db(request.app.state.db_path)
         try:
-            library = get_library(conn, library_id)
-            profiles = list_profiles(conn, library_id=library_id)
+            context = _library_detail_context(conn, request, library_id)
         finally:
             conn.close()
-        if library is None:
+        if context is None:
             raise HTTPException(status_code=404)
         templates = request.app.state.templates
         return templates.TemplateResponse(
             request,
             "library_detail.html",
             {
-                "request": request,
-                "library": library,
-                "profiles": profiles,
+                **context,
                 "error": message,
-                "show_nav": True,
             },
             status_code=status_code,
         )
-
-    if not key_value or not model_value:
-        return render_error("Key and model name are required")
-
-    try:
-        use_fp16_value = int(use_fp16)
-    except ValueError:
-        return render_error("Use FP16 must be 0 or 1")
-    if use_fp16_value not in (0, 1):
-        return render_error("Use FP16 must be 0 or 1")
-
-    try:
-        enabled_value = int(enabled)
-    except ValueError:
-        return render_error("Enabled must be 0 or 1")
-    if enabled_value not in (0, 1):
-        return render_error("Enabled must be 0 or 1")
-
-    try:
-        max_length_value = int(max_length)
-    except ValueError:
-        return render_error("Max length must be greater than 0")
-    if max_length_value <= 0:
-        return render_error("Max length must be greater than 0")
 
     conn = connect_db(request.app.state.db_path)
     try:
         library = get_library(conn, library_id)
         if library is None:
             raise HTTPException(status_code=404)
+        latest_dataset = job_service.get_latest_dataset_for_library(conn, library_id)
         try:
-            add_profile(
+            changed = upsert_active_profile(
                 conn,
                 library_id=library_id,
-                key=key_value,
-                model_name=model_value,
-                use_fp16=use_fp16_value,
-                max_length=max_length_value,
-                variant=variant_value,
-                enabled=enabled_value,
+                model_name=model_name,
+                use_fp16=int(use_fp16),
+                max_length=int(max_length),
+                commit=False,
             )
-        except sqlite3.IntegrityError:
+        except ValueError as exc:
             conn.rollback()
-            return render_error("Profile key already exists")
+            return render_error(str(exc))
+        if changed and latest_dataset is not None:
+            job_service.create_job(
+                conn,
+                library_id=library_id,
+                dataset_id=int(latest_dataset["id"]),
+                job_type="build",
+                status="queued",
+                commit=False,
+            )
+            job_service.supersede_queued_jobs(conn, library_id)
+        else:
+            conn.commit()
     finally:
         conn.close()
 
-    return RedirectResponse(f"/libraries/{library_id}", status_code=302)
+    return _redirect_with_notice(f"/libraries/{library_id}", "Search configuration saved")

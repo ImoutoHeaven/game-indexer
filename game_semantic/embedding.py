@@ -1,5 +1,6 @@
 """BGE-M3 embedding wrapper."""
 
+from functools import lru_cache
 from typing import List
 
 import numpy as np
@@ -32,3 +33,9 @@ class BgeM3Embedder:
         )
         dense_vecs = encoded["dense_vecs"]
         return dense_vecs
+
+
+@lru_cache(maxsize=None)
+def get_cached_bge_m3(model_name: str, use_fp16: bool) -> BgeM3Embedder:
+    """Return one cached embedder instance per (model_name, use_fp16) pair."""
+    return BgeM3Embedder(model_name=model_name, use_fp16=use_fp16)
