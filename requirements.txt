@@ -1,5 +1,6 @@
 FlagEmbedding>=1.2.10
 meilisearch>=0.32.0
+numpy>=1.17
 tqdm>=4.66.0
 python-dotenv>=1.0.0
 fastapi>=0.115.0
