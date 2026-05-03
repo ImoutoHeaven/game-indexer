@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -32,3 +33,15 @@ def create_app(db_path: str = "app.db", data_dir: str | Path | None = None) -> F
         return {"status": "ok"}
 
     return app
+
+
+def create_web_ui_app() -> FastAPI:
+    data_dir = os.environ.get("GAME_WEB_DATA_DIR")
+    db_path = os.environ.get("GAME_WEB_DB_PATH")
+    if db_path is None:
+        resolved_data_dir = resolve_data_dir(data_dir)
+        db_path = str(resolved_data_dir / "app.db")
+    else:
+        resolved_data_dir = resolve_data_dir(data_dir, db_path)
+    resolved_data_dir.mkdir(parents=True, exist_ok=True)
+    return create_app(db_path=db_path, data_dir=resolved_data_dir)

@@ -2,6 +2,7 @@
 """CLI entrypoint for local Web UI."""
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -27,14 +28,15 @@ def main():
     data_dir = resolve_data_dir(args.data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
     db_path = data_dir / "app.db"
+    os.environ["GAME_WEB_DB_PATH"] = str(db_path)
+    os.environ["GAME_WEB_DATA_DIR"] = str(data_dir)
 
     uvicorn.run(
-        "game_web.app:create_app",
+        "game_web.app:create_web_ui_app",
         factory=True,
         host=args.host,
         port=args.port,
         reload=args.reload,
-        kwargs={"db_path": str(db_path), "data_dir": str(data_dir)},
     )
 
 
